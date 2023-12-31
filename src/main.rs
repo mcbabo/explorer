@@ -1,14 +1,30 @@
 use std::{env};
 use std::ffi::OsString;
 use std::fs;
-use std::fs::Metadata;
+use std::fs::{Metadata, ReadDir};
+use crossterm::terminal::size;
 
+struct CustomTerminal {
+    width: u16,
+    height: u16,
+}
+
+impl CustomTerminal {
+    fn new(width: u16, height: u16) -> CustomTerminal {
+        return Self { width, height };
+    }
+}
+
+#[derive(Clone)]
+#[derive(Debug)]
 enum FileType {
     File,
     Directory,
     Link,
 }
 
+#[derive(Clone)]
+#[derive(Debug)]
 struct File {
     name: OsString,
     file_type: FileType,
@@ -27,7 +43,7 @@ impl File {
                 let mut count: usize = 0;
                 let mut new_size: f32 = self.size as f32;
                 while new_size >= 1024.0 {
-                    new_size = new_size/1024.0;
+                    new_size = new_size / 1024.0;
                     count += 1;
                 }
 
@@ -36,30 +52,23 @@ impl File {
                 return match count {
                     0 => {
                         new_size.to_string() + &String::from(" bytes")
-                    },
+                    }
                     1 => {
                         new_size.to_string() + &String::from(" kb")
-                    },
+                    }
                     2 => {
                         new_size.to_string() + &String::from(" mb")
-                    },
+                    }
                     3 => {
                         new_size.to_string() + &String::from(" gb")
-                    },
+                    }
                     4 => {
                         new_size.to_string() + &String::from(" tb")
-                    },
+                    }
                     _ => {
                         new_size.to_string() + &String::from(" bytes")
                     }
-                }
-                /*
-                if self.size <= 1024 {
-                    self.size.to_string() + &String::from(" bytes")
-                } else {
-                    (self.size / 1024).to_string() + &String::from(" kb")
-                }
-                */
+                };
             }
             _ => String::from("..."),
         };
@@ -67,16 +76,16 @@ impl File {
 
     fn show_name(self: &File) -> String {
         return match self.file_type {
-            FileType::Directory => String::from("\x1b[34m") + &self.name.to_str().unwrap().to_string() + &" ".repeat(20) + &String::from("\x1b[0m"),
+            FileType::Directory => String::from("\x1b[34m") + &self.name.to_str().unwrap().to_string() + &String::from("\x1b[0m"),
             FileType::File => {
-                if self.name.to_str().unwrap().to_string().split(".").last().unwrap() == "exe"{
+                if self.name.to_str().unwrap().to_string().split(".").last().unwrap() == "exe" {
                     String::from("\x1b[33;32m") + &self.name.to_str().unwrap().to_string() + &String::from("\x1b[0m")
                 } else {
                     self.name.to_str().unwrap().to_string()
                 }
             }
             _ => self.name.to_str().unwrap().to_string()
-        }
+        };
     }
 
     fn show_filetype(self: &File) -> String {
@@ -88,30 +97,10 @@ impl File {
     }
 }
 
-fn pretty_print(files: Vec<File>, max_name_len: usize) {
-    //println!("{0: <max_name_len$} | {1: <10} | {2: <10}", "name", "type", "size", max_name_len=max_name_len);
-    //let line = "-".repeat(max_name_len+1);
-    //println!("{:}+------------+-----------", line);
-    for file in files {
-        println!("{:}", file.show_name());
-        //println!("{0: <max_name_len$} | {1: <10} | {2:}", file.show_name(), file.show_filetype(), &file.show_size(), max_name_len=max_name_len);
-    }
-}
-
-fn main() -> std::io::Result<()> {
-    let raw_files;
-
-    if let Some(arg1) = env::args().nth(1) {
-        raw_files = fs::read_dir(&arg1).unwrap();
-    } else {
-        raw_files = fs::read_dir(env::current_dir().unwrap()).unwrap();
-    }
-
+fn get_files(dir: ReadDir) -> Vec<File> {
     let mut files: Vec<File> = vec![];
 
-    let mut max_name_len: usize = 10;
-
-    for file in raw_files {
+    for file in dir {
         let mut temp_type: FileType = FileType::File;
 
         if file.as_ref().unwrap().metadata().unwrap().is_dir() {
@@ -122,14 +111,100 @@ fn main() -> std::io::Result<()> {
             temp_type = FileType::File;
         }
 
-        if file.as_ref().unwrap().file_name().to_str().unwrap().to_string().len() >= max_name_len {
-            max_name_len = file.as_ref().unwrap().file_name().to_str().unwrap().to_string().len();
-        }
-
         files.push(File::new(file.as_ref().unwrap().file_name(), temp_type, file.as_ref().unwrap().metadata().unwrap(), file.as_ref().unwrap().metadata().unwrap().len()))
     }
 
-    pretty_print(files, max_name_len);
+    return files;
+}
+
+fn can_be_printed(term_width: &u16, files: &Vec<File>, columns: u16) -> bool {
+    let lines = 1 + (u16::try_from(files.len()).unwrap() - 1) / columns;
+
+    for i in 0..lines {
+        let mut w: usize = 0;
+        w += files.get(i as usize).unwrap().name.to_str().unwrap().len() * 2;
+
+        for j in (i + lines..u16::try_from(files.len()).unwrap()).step_by(lines as usize) {
+            w += 2 + files.get(j as usize).unwrap().name.to_str().unwrap().len()
+        }
+
+        if u16::try_from(w).unwrap() > *term_width {
+            return false;
+        }
+    }
+    return true;
+}
+
+fn main() -> std::io::Result<()> {
+    let mut terminal: CustomTerminal = CustomTerminal { width: 0, height: 0 };
+    let size = size();
+
+    match size {
+        Ok(size) => {
+            println!("{}, {}", size.0, size.1);
+            terminal = CustomTerminal::new(size.0, size.1);
+        }
+        Err(_) => {}
+    }
+
+    let raw_files;
+
+    if let Some(arg1) = env::args().nth(1) {
+        raw_files = fs::read_dir(&arg1).unwrap();
+    } else {
+        raw_files = fs::read_dir(env::current_dir().unwrap()).unwrap();
+    }
+
+    let files: Vec<File> = get_files(raw_files);
+
+    let mut max_name_len: usize = 10;
+
+    for file in &files {
+        if file.name.len() >= max_name_len {
+            max_name_len = file.name.len();
+        }
+    }
+
+    let mut low = 1;
+    let mut high = terminal.width;
+
+    while high - low > 1 {
+        let mid = (low + high) / 2;
+        let ans = can_be_printed(&terminal.width, &files, mid);
+        if ans {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+
+    let mut ans;
+    if can_be_printed(&terminal.width, &files, high) {
+        ans = high;
+    } else {
+        ans = low;
+    }
+
+    println!("Max col {}", ans);
+
+    if files.len() <= ans as usize {
+        ans = 1;
+    }
+
+    let chunks: Vec<_> = files.chunks(&files.len() / ans as usize).collect();
+
+    for i in 0..ans as usize {
+        for chunk in &chunks {
+            match chunk.get(i) {
+                Some(file) => {
+                    let current_len = max_name_len - file.name.to_str().unwrap().len();
+                    print!("{}{}", file.show_name(), " ".repeat(current_len + 2));
+                }
+                None => {}
+            }
+        }
+        println!()
+    }
     /*
     println!("\x1b[31mThis is red text\x1b[0m");
     println!("\x1b[34mThis is blue text\x1b[0m");
