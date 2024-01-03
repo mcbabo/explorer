@@ -15,16 +15,14 @@ impl CustomTerminal {
     }
 }
 
-#[derive(Clone)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum FileType {
     File,
     Directory,
     Link,
 }
 
-#[derive(Clone)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct File {
     name: OsString,
     file_type: FileType,
