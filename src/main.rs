@@ -117,15 +117,15 @@ fn get_files(dir: ReadDir) -> Vec<File> {
     return files;
 }
 
-fn can_be_printed(term_width: &u16, files: &Vec<File>, columns: u16) -> bool {
+fn can_be_printed(term_width: &u16, files: &Vec<File>, columns: u16, max_name_len: usize) -> bool {
     let lines = 1 + (u16::try_from(files.len()).unwrap() - 1) / columns;
 
     for i in 0..lines {
         let mut w: usize = 0;
-        w += files.get(i as usize).unwrap().name.to_str().unwrap().len() * 2;
+        w += files.get(i as usize).unwrap().name.to_str().unwrap().len() * 2 + (max_name_len - files.get(i as usize).unwrap().name.to_str().unwrap().len());
 
         for j in (i + lines..u16::try_from(files.len()).unwrap()).step_by(lines as usize) {
-            w += 2 + files.get(j as usize).unwrap().name.to_str().unwrap().len()
+            w += 2 + (max_name_len - files.get(i as usize).unwrap().name.to_str().unwrap().len()) + files.get(j as usize).unwrap().name.to_str().unwrap().len()
         }
 
         if u16::try_from(w).unwrap() > *term_width {
@@ -141,7 +141,7 @@ fn main() -> std::io::Result<()> {
 
     match size {
         Ok(size) => {
-            println!("{}, {}", size.0, size.1);
+            println!("{}, {}\n", size.0, size.1);
             terminal = CustomTerminal::new(size.0, size.1);
         }
         Err(_) => {}
@@ -170,7 +170,7 @@ fn main() -> std::io::Result<()> {
 
     while high - low > 1 {
         let mid = (low + high) / 2;
-        let ans = can_be_printed(&terminal.width, &files, mid);
+        let ans = can_be_printed(&terminal.width, &files, mid, max_name_len);
         if ans {
             low = mid;
         } else {
@@ -178,39 +178,36 @@ fn main() -> std::io::Result<()> {
         }
     }
 
-    let mut ans;
-    if can_be_printed(&terminal.width, &files, high) {
-        ans = high;
+    let mut columns: usize;
+    if can_be_printed(&terminal.width, &files, high, max_name_len) {
+        columns = high as usize;
     } else {
-        ans = low;
+        columns = low as usize;
     }
 
-    println!("Max col {}", ans);
-
-    if files.len() <= ans as usize {
-        ans = 1;
-    }
-
-    let chunks: Vec<_> = files.chunks(&files.len() / ans as usize).collect();
-
-    for i in 0..ans as usize {
-        for chunk in &chunks {
-            match chunk.get(i) {
-                Some(file) => {
-                    let current_len = max_name_len - file.name.to_str().unwrap().len();
-                    print!("{}{}", file.show_name(), " ".repeat(current_len + 2));
-                }
-                None => {}
+    for y in 0..files.len() / columns {
+        for x in 0..columns {
+            let file = &files[y * columns + x];
+            let current_len = max_name_len - file.name.to_str().unwrap().len();
+            if x != columns -1 {
+                print!("{}{}", file.show_name(), " ".repeat(current_len + 2));
+            } else {
+                print!("{}", file.show_name());
             }
+        }
+        println!();
+    }
+
+    let rem = files.len() % columns;
+
+    if rem != 0 {
+        for file in &files[files.len() - rem..] {
+            let current_len = max_name_len - file.name.to_str().unwrap().len();
+            print!("{}{}", file.show_name(), " ".repeat(current_len + 2));
         }
         println!()
     }
-    /*
-    println!("\x1b[31mThis is red text\x1b[0m");
-    println!("\x1b[34mThis is blue text\x1b[0m");
-    println!("\x1b[33;1mThis is bold yellow text\x1b[0m");
-    println!("\x1b[33;32mThis is underlined text\x1b[0m");
-    println!("\x1b[5mThis is blinking text\x1b[0m");
-    */
+
+    println!();
     Ok(())
 }
